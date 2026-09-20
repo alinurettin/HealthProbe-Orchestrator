@@ -1,0 +1,12 @@
+﻿{
+  "name": "healthprobe-orchestrator",
+  "version": "1.0.0",
+  "description": "Automated TCP/HTTP synthetic probe runner with geographic latency telemetry and auto-remediation webhooks.",
+  "main": "src/index.js",
+  "scripts": {
+    "start": "node src/index.js",
+    "test": "node tests/run_tests.js"
+  },
+  "author": "Ali Nurettin Demir",
+  "license": "MIT"
+}
