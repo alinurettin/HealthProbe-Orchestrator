@@ -1,7 +1,7 @@
-﻿{
+{
   "name": "healthprobe-orchestrator",
-  "version": "1.0.0",
-  "description": "Automated TCP/HTTP synthetic probe runner with geographic latency telemetry and auto-remediation webhooks.",
+  "version": "2.0.0",
+  "description": "Enterprise Multi-Protocol Synthetic Prober, Nearest-Rank Percentile Latency Engine, and Flapping-Resistant Orchestrator",
   "main": "src/index.js",
   "scripts": {
     "start": "node src/index.js",

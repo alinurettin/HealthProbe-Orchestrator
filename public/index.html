@@ -1,36 +1,160 @@
-﻿<!DOCTYPE html>
+<!DOCTYPE html>
 <html lang="en">
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>HealthProbe-Orchestrator | Operational Studio</title>
+  <title>HealthProbe-Orchestrator v2.0.0 | Synthetic SLA & Telemetry Console</title>
   <link rel="stylesheet" href="style.css">
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:ital,wght@0,300;0,400;0,600;0,800;1,400&family=Inter:wght@300;400;500;600;700;800&display=swap" rel="stylesheet">
 </head>
 <body>
-  <header class="header">
-    <div class="brand">
-      <span class="logo">⚡</span>
-      <div>
-        <h1>HealthProbe-Orchestrator</h1>
-        <span class="sub">Distributed Multi-Cloud Health Check Probe</span>
+  <div class="app-container">
+    <header class="app-header">
+      <div class="brand">
+        <div class="brand-icon">⚡</div>
+        <div class="brand-info">
+          <h1>HealthProbe-Orchestrator <span class="badge version">v2.0.0</span></h1>
+          <p class="subtitle">Distributed Synthetic Health Engine &bull; Nearest-Rank Latency &bull; Flapping Detection</p>
+        </div>
       </div>
-    </div>
-    <div class="status-badge">🟢 Operational Active</div>
-  </header>
-  <main class="main">
-    <div class="card">
-      <h2>Engine Overview</h2>
-      <p>Automated TCP/HTTP synthetic probe runner with geographic latency telemetry and auto-remediation webhooks.</p>
-      <div class="metrics-row" id="metricsRow">
-        <div class="metric"><span class="lbl">STATUS</span><span class="val">HEALTHY</span></div>
-        <div class="metric"><span class="lbl">LATENCY</span><span class="val">1.2 ms</span></div>
-        <div class="metric"><span class="lbl">THROUGHPUT</span><span class="val">1,250 req/s</span></div>
+      <div class="header-actions">
+        <div class="sse-status" id="sseStatus">
+          <span class="pulse-dot"></span>
+          <span id="sseLabel">SSE Disconnected</span>
+        </div>
+        <button id="btnSweep" class="btn btn-primary">
+          <span class="btn-icon">▶</span> Trigger Fleet Sweep
+        </button>
       </div>
+    </header>
+
+    <!-- Top KPI Grid -->
+    <section class="kpi-grid">
+      <div class="kpi-card">
+        <div class="kpi-header">
+          <span class="kpi-title">TOTAL TARGETS</span>
+          <span class="kpi-icon">🌐</span>
+        </div>
+        <div class="kpi-value" id="kpiTotalTargets">--</div>
+        <div class="kpi-sub">Registered probe endpoints</div>
+      </div>
+      <div class="kpi-card healthy">
+        <div class="kpi-header">
+          <span class="kpi-title">HEALTHY FLEET</span>
+          <span class="kpi-icon">🟢</span>
+        </div>
+        <div class="kpi-value" id="kpiHealthy">--</div>
+        <div class="kpi-sub" id="kpiHealthyPct">100% operational</div>
+      </div>
+      <div class="kpi-card degraded">
+        <div class="kpi-header">
+          <span class="kpi-title">DEGRADED / FAILING</span>
+          <span class="kpi-icon">🟡</span>
+        </div>
+        <div class="kpi-value" id="kpiDegraded">0</div>
+        <div class="kpi-sub">Intermittent timeouts</div>
+      </div>
+      <div class="kpi-card down">
+        <div class="kpi-header">
+          <span class="kpi-title">OUTAGES / DOWN</span>
+          <span class="kpi-icon">🔴</span>
+        </div>
+        <div class="kpi-value" id="kpiDown">0</div>
+        <div class="kpi-sub">Critical SLA breach</div>
+      </div>
+      <div class="kpi-card">
+        <div class="kpi-header">
+          <span class="kpi-title">FLEET MEAN LATENCY</span>
+          <span class="kpi-icon">⏱️</span>
+        </div>
+        <div class="kpi-value" id="kpiAvgLatency">-- <span class="unit">ms</span></div>
+        <div class="kpi-sub">Nearest-Rank aggregated</div>
+      </div>
+      <div class="kpi-card">
+        <div class="kpi-header">
+          <span class="kpi-title">TOTAL PROBES RUN</span>
+          <span class="kpi-icon">📊</span>
+        </div>
+        <div class="kpi-value" id="kpiTotalProbes">--</div>
+        <div class="kpi-sub">Synthetic executions</div>
+      </div>
+    </section>
+
+    <!-- Main Workspace -->
+    <div class="workspace-layout">
+      <!-- Target Endpoints Section -->
+      <section class="endpoints-panel">
+        <div class="panel-header">
+          <h2>Active Fleet Endpoints</h2>
+          <button id="btnToggleAdd" class="btn btn-secondary btn-sm">+ Add Target Endpoint</button>
+        </div>
+
+        <!-- Add Target Form (Hidden by default) -->
+        <div class="add-target-box" id="addTargetBox" style="display: none;">
+          <h3>Register New Synthetic Target</h3>
+          <form id="newTargetForm">
+            <div class="form-grid">
+              <div class="form-group">
+                <label>Target Identifier</label>
+                <input type="text" id="targetId" placeholder="e.g. auth_gateway" required>
+              </div>
+              <div class="form-group">
+                <label>Display Name</label>
+                <input type="text" id="targetName" placeholder="e.g. Identity & JWT Service" required>
+              </div>
+              <div class="form-group">
+                <label>Protocol</label>
+                <select id="targetProtocol">
+                  <option value="HTTP">HTTP (Status Check)</option>
+                  <option value="TCP">TCP (Socket Handshake)</option>
+                </select>
+              </div>
+              <div class="form-group">
+                <label>Host / IP</label>
+                <input type="text" id="targetHost" value="127.0.0.1" required>
+              </div>
+              <div class="form-group">
+                <label>Port</label>
+                <input type="number" id="targetPort" value="80" required>
+              </div>
+              <div class="form-group" id="pathGroup">
+                <label>HTTP Path</label>
+                <input type="text" id="targetPath" value="/health">
+              </div>
+            </div>
+            <div class="form-actions">
+              <button type="submit" class="btn btn-primary btn-sm">Register Endpoint</button>
+              <button type="button" id="btnCancelAdd" class="btn btn-secondary btn-sm">Cancel</button>
+            </div>
+          </form>
+        </div>
+
+        <div class="endpoints-list" id="endpointsList">
+          <!-- Populated dynamically -->
+          <div class="loading-state">Loading synthetic targets...</div>
+        </div>
+      </section>
+
+      <!-- Real-Time Activity & Telemetry Feed -->
+      <aside class="activity-panel">
+        <div class="panel-header">
+          <h2>Real-Time Probe Stream</h2>
+          <span class="live-badge">LIVE SSE</span>
+        </div>
+        <div class="feed-container" id="feedContainer">
+          <div class="feed-empty">Listening for live synthetic telemetry...</div>
+        </div>
+      </aside>
     </div>
-  </main>
-  <footer class="footer">
-    <p>HealthProbe-Orchestrator &bull; Autonomously engineered by 7-Agent SDLC Factory for <a href="https://github.com/alinurettin/HealthProbe-Orchestrator" target="_blank">Ali Nurettin Demir</a></p>
-  </footer>
+
+    <!-- Footer -->
+    <footer class="app-footer">
+      <p>HealthProbe-Orchestrator v2.0.0 &bull; Autonomously engineered by 7-Agent SDLC Factory for <a href="https://github.com/alinurettin/HealthProbe-Orchestrator" target="_blank">Ali Nurettin Demir</a></p>
+    </footer>
+  </div>
+
   <script src="app.js"></script>
 </body>
 </html>

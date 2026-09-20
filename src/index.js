@@ -1,91 +1,157 @@
-﻿// HealthProbe-Orchestrator - Production Engine Entrypoint
+// HealthProbe-Orchestrator v2.0.0 - Production HTTP Server & Telemetry Gateway
 const http = require('http');
 const fs = require('fs');
 const path = require('path');
-const url = require('url');
-const CoreEngine = require('./engine');
+const { URL } = require('url');
+const { HealthProbeOrchestrator } = require('./engine');
 
-const engine = new CoreEngine();
-const PORT = parseInt(process.env.PORT, 10) || 6000;
+const orchestrator = new HealthProbeOrchestrator();
+const PORT = parseInt(process.env.PORT, 10) || 6015;
 const publicDir = path.join(__dirname, '..', 'public');
 const startTime = Date.now();
 
 function requestHandler(req, res) {
-  const parsed = url.parse(req.url, true);
-  const pathname = parsed.pathname;
+  const reqUrl = new URL(req.url, 'http://' + (req.headers.host || 'localhost'));
+  const pathname = reqUrl.pathname;
 
+  // CORS Headers
   if (req.method === 'OPTIONS') {
     res.writeHead(204, {
       'Access-Control-Allow-Origin': '*',
-      'Access-Control-Allow-Methods': 'GET, POST, OPTIONS',
-      'Access-Control-Allow-Headers': 'Content-Type'
+      'Access-Control-Allow-Methods': 'GET, POST, PUT, DELETE, OPTIONS',
+      'Access-Control-Allow-Headers': 'Content-Type, Authorization, X-Requested-With'
     });
     return res.end();
   }
 
+  // SSE Live Stream Endpoint
+  if (req.method === 'GET' && pathname === '/api/events/stream') {
+    res.writeHead(200, {
+      'Content-Type': 'text/event-stream',
+      'Cache-Control': 'no-cache',
+      'Connection': 'keep-alive',
+      'Access-Control-Allow-Origin': '*'
+    });
+    res.write('retry: 3000\n\n');
+
+    const initData = JSON.stringify({
+      type: 'INIT',
+      metrics: orchestrator.metrics(),
+      timestamp: Date.now()
+    });
+    res.write(`event: init\ndata: ${initData}\n\n`);
+
+    orchestrator.subscribe(res);
+    return;
+  }
+
   let body = '';
-  req.on('data', chunk => body += chunk);
-  req.on('end', () => {
+  req.on('data', chunk => { body += chunk; });
+  req.on('end', async () => {
+    const jsonRes = (statusCode, data) => {
+      res.writeHead(statusCode, {
+        'Content-Type': 'application/json; charset=utf-8',
+        'Access-Control-Allow-Origin': '*'
+      });
+      res.end(JSON.stringify(data));
+    };
+
+    // 1. Health API
     if (pathname === '/api/health') {
-      res.writeHead(200, { 'Content-Type': 'application/json; charset=utf-8', 'Access-Control-Allow-Origin': '*' });
-      return res.end(JSON.stringify({
+      return jsonRes(200, {
         status: 'UP',
         service: 'HealthProbe-Orchestrator',
+        version: '2.0.0',
         uptimeSeconds: Math.floor((Date.now() - startTime) / 1000),
         timestamp: new Date().toISOString()
-      }));
+      });
     }
 
+    // 2. Stats & Telemetry API
     if (pathname === '/api/stats') {
-      res.writeHead(200, { 'Content-Type': 'application/json; charset=utf-8', 'Access-Control-Allow-Origin': '*' });
-      return res.end(JSON.stringify({
+      return jsonRes(200, {
         success: true,
         service: 'HealthProbe-Orchestrator',
-        description: 'Automated TCP/HTTP synthetic probe runner with geographic latency telemetry and auto-remediation webhooks.',
-        status: 'OPTIMAL',
-        activeItems: engine.count()
-      }));
+        version: '2.0.0',
+        metrics: orchestrator.metrics()
+      });
     }
 
-    if (req.method === 'POST' && pathname === '/api/process') {
+    // 3. Targets List API
+    if (req.method === 'GET' && pathname === '/api/targets') {
+      const targets = Array.from(orchestrator.targets.values()).map(t => t.getMetrics());
+      return jsonRes(200, { success: true, targets });
+    }
+
+    // 4. Add Target API
+    if (req.method === 'POST' && pathname === '/api/targets') {
       try {
         const data = JSON.parse(body || '{}');
-        const resObj = engine.process(data);
-        res.writeHead(200, { 'Content-Type': 'application/json', 'Access-Control-Allow-Origin': '*' });
-        return res.end(JSON.stringify({ success: true, result: resObj }));
-      } catch (e) {
-        res.writeHead(400, { 'Content-Type': 'application/json' });
-        return res.end(JSON.stringify({ error: e.message }));
+        const target = orchestrator.addTarget(data);
+        return jsonRes(200, { success: true, target: target.getMetrics() });
+      } catch (err) {
+        return jsonRes(400, { success: false, error: err.message });
       }
     }
 
-    let filePath = path.join(publicDir, pathname === '/' ? 'index.html' : pathname);
-    fs.stat(filePath, (err, stats) => {
-      if (!err && stats.isFile()) {
-        const ext = path.extname(filePath);
-        const mime = ext === '.html' ? 'text/html; charset=utf-8' : (ext === '.css' ? 'text/css' : 'application/javascript');
-        res.writeHead(200, { 'Content-Type': mime, 'Access-Control-Allow-Origin': '*' });
-        fs.createReadStream(filePath).pipe(res);
-      } else {
-        res.writeHead(404, { 'Content-Type': 'application/json' });
-        res.end(JSON.stringify({ error: '404 Not Found', path: pathname }));
+    // 5. Delete Target API
+    const deleteMatch = pathname.match(/^\/api\/targets\/([^/]+)$/);
+    if (req.method === 'DELETE' && deleteMatch) {
+      const targetId = deleteMatch[1];
+      const removed = orchestrator.removeTarget(targetId);
+      return jsonRes(200, { success: removed, targetId });
+    }
+
+    // 6. Trigger Probe Sweep API
+    if (req.method === 'POST' && pathname === '/api/probe/sweep') {
+      try {
+        const results = await orchestrator.probeAll();
+        return jsonRes(200, { success: true, totalExecuted: results.length, metrics: orchestrator.metrics() });
+      } catch (err) {
+        return jsonRes(500, { success: false, error: err.message });
       }
-    });
+    }
+
+    // 7. Single Target Probe API
+    const singleProbeMatch = pathname.match(/^\/api\/probe\/([^/]+)$/);
+    if (req.method === 'POST' && singleProbeMatch) {
+      try {
+        const targetId = singleProbeMatch[1];
+        const outcome = await orchestrator.probeTarget(targetId);
+        return jsonRes(200, { success: true, outcome });
+      } catch (err) {
+        return jsonRes(400, { success: false, error: err.message });
+      }
+    }
+
+    // 8. Static Web UI Files
+    let filePath = path.join(publicDir, pathname === '/' ? 'index.html' : pathname);
+    if (fs.existsSync(filePath) && fs.statSync(filePath).isFile()) {
+      const ext = path.extname(filePath).toLowerCase();
+      const mimeTypes = {
+        '.html': 'text/html; charset=utf-8',
+        '.css': 'text/css; charset=utf-8',
+        '.js': 'application/javascript; charset=utf-8',
+        '.json': 'application/json; charset=utf-8'
+      };
+      res.writeHead(200, { 'Content-Type': mimeTypes[ext] || 'text/plain' });
+      return res.end(fs.readFileSync(filePath));
+    }
+
+    jsonRes(404, { error: 'Endpoint not found' });
   });
 }
 
-function startServer(port = PORT, callback) {
-  const s = http.createServer(requestHandler);
-  s.listen(port, () => {
-    if (callback) callback(s);
-  });
-  return s;
+function startServer(portToUse = PORT, callback) {
+  const server = http.createServer(requestHandler);
+  server.listen(portToUse, callback);
+  return server;
 }
 
 if (require.main === module) {
   startServer(PORT, () => {
-    console.log('HealthProbe-Orchestrator running on port ' + PORT);
+    console.log(`⚡ HealthProbe-Orchestrator v2.0.0 running on http://localhost:${PORT}`);
   });
 }
 
-module.exports = { startServer, requestHandler };
+module.exports = { startServer, orchestrator };
