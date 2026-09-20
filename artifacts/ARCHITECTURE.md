@@ -1,4 +1,4 @@
-﻿# ğŸ“ System Architecture Document: HealthProbe-Orchestrator
+﻿# 📐 System Architecture Document: HealthProbe-Orchestrator
 - **Project:** HealthProbe-Orchestrator
 - **Author:** Expert Software Architect
 - **Status:** APPROVED & COMPLETE
