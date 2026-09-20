@@ -1,4 +1,4 @@
-﻿# ğŸ“Š Product Requirements Document (PRD): HealthProbe-Orchestrator
+﻿# 📊 Product Requirements Document (PRD): HealthProbe-Orchestrator
 - **Project:** HealthProbe-Orchestrator
 - **Author:** Expert Business Analyst
 - **Status:** APPROVED & COMPLETE
